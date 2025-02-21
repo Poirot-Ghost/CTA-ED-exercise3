@@ -1,7 +1,7 @@
 ---
 title: "CTA-ED Exercise 3: Comparison and complexity"
-author: "[name here]"
-date: "2/28/2024"
+author: "Ziyi Wei"
+date: "2/12/2024"
 output: html_document
 ---
 
@@ -68,17 +68,15 @@ tweets_corpus <- corpus(tweets, text_field = "tweet")
 #add in username document-level information
 docvars(tweets_corpus, "username") <- tweets$username
 
-tweets_corpus
+head(tweets_corpus)
 ```
 
 We are now ready to reformat the data into a document feature matrix.
 
 ```{r}
-dfmat <- dfm(tokens(tweets_corpus),
-             remove_punct = TRUE, 
-             remove = stopwords("english"))
+dfmat <- dfm(tokens(tweets_corpus, remove_punct = TRUE)) %>% dfm_remove(pattern = stopwords("english"))
 
-dfmat
+head(dfmat)
 ```
 
 Note that when we do this we need to have tokenized our corpus object first. We can do this by wrapping the `tokens` function inside the `dfm()` function as above. 
@@ -133,6 +131,7 @@ We first convert the `textstat_simil()` output to a matrix.
 ```{r}
 
 cosmat <- as.matrix(cos_sim) #convert to a matrix
+head(cosmat)
   
 ```
 
@@ -237,7 +236,7 @@ speeches  <- readRDS(gzcon(url("https://github.com/cjbarrie/CTA-ED/blob/main/dat
 
 And we can take a look at what the data contains below.
 
-```{r}
+```{r, eval=F}
 
 head(speeches)
 
@@ -296,5 +295,222 @@ ggplot(sum_corpus, aes(x=speaker, y=mean)) +
 ## Exercises
 
 1. Compute distance measures such as "euclidean" or "manhattan" for the MP tweets as above, comparing between tweets by MPs and tweets by PM, Theresa May. 
+
+Use dist() function from proxy package to calculate the euclidean and manhattan distance between the MPs and the PM. The results show that there are some differences between these two methods. For example, trussliz has a relatively low similarity to the PM based on the Euclidean distance but holds a middle position in similarity when measured using the Manhattan distance.
+
+```{r}
+# Import proxy to use dist() function
+library(proxy)
+```
+
+```{r}
+# convert dfm to matrix and grouping by username
+dfm_matrix <- dfmat %>%
+    dfm_group(groups = username) %>%
+    as.matrix()
+
+# calculate the Euclidean distance
+euclidean_dist <- proxy::dist(dfm_matrix, method = "Euclidean")
+# choose the 23rd row and all columns except the 23rd column and convert it to a data frame
+euclidean_df_PM <- as.matrix(euclidean_dist)[23, c(1:22, 24)] %>% as.data.frame()
+```
+
+```{r}
+#rename column
+colnames(euclidean_df_PM) <- "corr_may"
+  
+#create column variable from rownames
+euclidean_df_PM <- tibble::rownames_to_column(euclidean_df_PM, "username")
+
+head(euclidean_df_PM)
+```
+
+```{r}
+# plot the Euclidean distance
+ggplot(euclidean_df_PM) +
+  geom_point(aes(x=reorder(username, -corr_may), y= corr_may)) + 
+  coord_flip() +
+  xlab("MP username") +
+  ylab("Euclidean distance score") + 
+  theme_minimal()
+```
+```{r}
+# calculate the Manhattan distance
+manhattan_dist <- proxy::dist(dfm_matrix, method = "Manhattan")
+manhattan_df_PM <- as.matrix(manhattan_dist)[23, c(1:22, 24)] %>% as.data.frame()
+```
+
+```{r}
+#rename column
+colnames(manhattan_df_PM) <- "corr_may"
+  
+#create column variable from rownames
+manhattan_df_PM <- tibble::rownames_to_column(manhattan_df_PM, "username")
+
+head(manhattan_df_PM)
+```
+
+```{r}
+ggplot(manhattan_df_PM) +
+  geom_point(aes(x=reorder(username, -corr_may), y= corr_may)) + 
+  coord_flip() +
+  xlab("MP username") +
+  ylab("Manhattan distance score") + 
+  theme_minimal()
+```
+
+
 2. Estimate at least three other complexity measures for the EU speeches as above. Consider how the results compare to the Flesch-Kincaid measure used in the article by @schoonvelde_liberals_2019.
+
+Complexity measures:Flesch-Kincaid Grade Level, SMOG Index, Flesch Reading Ease, Dale-Chall Readability Score
+Ranking:
+- Flesch-Kincaid: J.L.R. Zapatero > M. Rajoy > G. Brown > D. Cameron
+- SMOG: J.L.R. Zapatero > M. Rajoy > G. Brown > D. Cameron
+- Flesch: J.L.R. Zapatero > M. Rajoy > G. Brown > D. Cameron
+- Dale.Chall: J.L.R. Zapatero > M. Rajoy > G. Brown > D. Cameron
+(different complexity measures show similar results)
+```{r}
+# Complexity measures to calculate and compare
+# Flesch-Kincaid meaning the higher the score, the easier the text is to read
+# SMOG meaning the higher the score, the more difficult the text is to read
+# Flesch meaning the higher the score, the easier the text is to read
+# The New Dale.Chall meaning the higher the score, the easier the text is to read
+
+measures_com <- c("Flesch.Kincaid", "SMOG", "Flesch", "Dale.Chall")
+
+# Create an empty data frame to store results
+all_results_com <- data.frame()
+
+# Loop through each measure to calculate complexity and summarize results
+for (measure in measures_com) {
+  
+  # Calculate complexity scores
+  readability_scores <- textstat_readability(speeches$text, measure = measure)
+  
+  # Add the scores to the speeches data frame
+  speeches[[measure]] <- readability_scores[[measure]]
+  
+  # Summarize mean, SD, N, and confidence intervals per speaker
+  sum_corpus_com <- speeches %>%
+    group_by(speaker) %>%
+    summarise(
+      mean = mean(get(measure), na.rm = TRUE),
+      SD = sd(get(measure), na.rm = TRUE),
+      N = n()
+    ) %>%
+    mutate(
+      se = SD / sqrt(N),
+      min = mean - 1.96 * se,
+      max = mean + 1.96 * se,
+      measure = measure
+    )
+  
+  # Append to the results data frame
+  all_results_com <- bind_rows(all_results_com, sum_corpus_com)
+}
+
+```
+
+```{r}
+# Plotting the results
+ggplot(all_results_com, aes(x = speaker, y = mean, fill = measure)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9)) + # places bars for different groups side-by-side instead of stacking them
+  geom_errorbar(aes(ymin = min, ymax = max), width = 0.2, position = position_dodge(width = 0.9)) +
+  coord_flip() +
+  xlab("") +
+  ylab("Mean Complexity Score") +
+  labs(title = "Mean Complexity Scores with 95% Confidence Intervals",
+       fill = "Complexity Measure") +
+  theme_minimal()
+```
+
 3. (Advanced---optional) Estimate similarity scores between the MP tweets and the PM tweets for each week contained in the data. Plot the results. 
+
+The results show that the similarity scores between MPs and the PM vary over time. Highest around the end of 2017 and the beginning of 2018, and lowest around Sep of 2017. Almost all the similarity scores of the MPs fluctuate significantly over time.
+```{r}
+# Import lubridate to manipulate dates
+library(lubridate)
+# import pivot_longer() function from tidyr package
+library(tidyr)
+```
+
+```{r}
+# convert date to week
+docvars(dfmat, "week") <- floor_date(docvars(dfmat, "date"), unit = "week") # floor_date() function from lubridate package to round down to the nearest week
+head(docvars(dfmat))
+```
+
+```{r}
+#specify different similarity measures to explore
+methods_sim_week <- c("correlation", "cosine")
+
+#create empty dataframe
+testdf_all_week <- data.frame()
+
+#gen for loop across methods types
+for (i in seq_along(methods_sim_week)) {
+  
+  # pass method to character string object
+  sim_method_week <- methods_sim_week[[i]]
+  
+  # group by username and week
+  test_week <- dfmat %>%
+    dfm_group(groups = interaction(username, week, sep = "_")) %>%
+    textstat_simil(margin = "documents", method = sim_method_week)
+  
+  testm_week <- as.matrix(test_week) #convert to a matrix
+  
+  # Convert matrix to a long-format dataframe for plotting
+  testdf_week <- as.data.frame(testm_week) %>%
+    tibble::rownames_to_column("doc1") %>%
+    pivot_longer(-doc1, names_to = "doc2", values_to = "similarity") # Convert wide to long format；doc1 is the row name, doc2 is the column name
+  
+  # filter pairs where one document corresponds to "theresa_may"
+  testdf_week <- testdf_week %>%
+    filter(grepl("^theresa_may_", doc1) & !grepl("^theresa_may_", doc2))  # comparing theresa_may to others; filter rows where 'doc1' starts with "theresa_may_" and 'doc2' does not
+  
+  # extract 'username' and 'week' from docnames
+  testdf_week <- testdf_week %>%
+    mutate(
+      week = sub(".*_", "", doc1),  # Extract week from doc1 (theresa_may_xxx), remove everything before the last "_"
+      username = sub("_(\\d{4}-\\d{2}-\\d{2})$", "", doc2)  # Extract username from doc2, remove everything after the last "_"
+    ) %>%
+    mutate(
+      week = as.Date(week),
+      method = sim_method_week
+    ) %>%
+    select(username, week, similarity, method)
+  
+  # append results
+  testdf_all_week <- bind_rows(testdf_all_week, testdf_week)
+}
+```
+
+```{r}
+# calculate mean similarity for plotting
+testdf_all_week <- testdf_all_week %>%
+  group_by(username, week) %>%
+  mutate(mean_sim = mean(similarity, na.rm = TRUE))
+```
+
+```{r, fig.width=12, fig.height=16}
+# plot similarity trends over weeks
+ggplot(testdf_all_week, aes(x = week, y = mean_sim, color = username)) +
+  geom_line(aes(group = username), size = 0.2) +
+  geom_point(size = 0.8) +
+  facet_wrap(~ method, ncol = 1) + # Separate plots by method, 1 column
+  coord_flip() +
+  scale_x_date(
+    expand = expansion(mult = c(0.1, 0.1)),  # Add space before and after the axis
+    date_breaks = "1 month",  
+    date_labels = "%b %Y"  # Format as "Jan 2024", etc.
+  ) +
+  labs(
+    title = "Weekly Similarity Between MPs and Theresa May",
+    x = "Week",
+    y = "Similarity Score",
+    color = "MP Username"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
